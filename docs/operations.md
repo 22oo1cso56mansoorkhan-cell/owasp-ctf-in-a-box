@@ -515,6 +515,18 @@ The panel offers:
     the charge; a solve landing in the same instant shows on the refresh
     that follows). A free hint (cost `0`) skips the check.
 
+  - **Price changes** (no knob — it follows **Hint cost**) — a contestant
+    is charged the price their confirm button showed, or nothing. The
+    purchase carries that price, and the charging script reads the current
+    **Hint cost** itself and compares the two in the same atomic step as the
+    charge (the affordability check and the charge use that same live
+    price): if an organizer changed the cost after the page rendered,
+    nothing is charged,
+    the request answers 409 with the new price, and the button asks again
+    at it ("This hint now costs N pts. Confirm again to buy it at the new
+    price."). Re-viewing a hint already bought is free and never refused
+    this way.
+
   - **Scoring window** (no knob — it follows **Freeze scoring** and the
     **Scoring closes** schedule) — a hint purchase lowers the buyer's net,
     so it is a scoring action and closes with scoring (#566): while scoring

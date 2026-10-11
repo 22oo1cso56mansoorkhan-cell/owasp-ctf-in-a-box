@@ -527,6 +527,67 @@ describe("revealHint", () => {
     expect(args[8]).toBe(""); // no gross, no revision to vouch for
   });
 
+  // #557: the contestant confirmed a price; the charge must be that price or
+  // nothing. The quote goes to the script, which compares it to the cost it
+  // charges, atomically with the charge.
+  it("hands the script the quoted cost the contestant confirmed, and \"\" when none was sent", async () => {
+    const store = await loadStore();
+    mocks.getAdminSettings.mockResolvedValue({ ...BASE_SETTINGS, hintCost: 25 });
+    mocks.upstashEval.mockResolvedValue(["charged", "text", 25]);
+    await store.revealHint("octocat", "juice-shop", "Challenge-5-Admin-Section", { quotedCost: 10 });
+    await store.revealHint("octocat", "juice-shop", "Challenge-5-Admin-Section");
+    expect(mocks.upstashEval.mock.calls[0][2][11]).toBe("10");
+    expect(mocks.upstashEval.mock.calls[1][2][11]).toBe("");
+  });
+
+  it("reports the price the script charged, not the one it read before the call", async () => {
+    const store = await loadStore();
+    mocks.getAdminSettings.mockResolvedValue({ ...BASE_SETTINGS, hintCost: 10 });
+    mocks.upstashEval.mockResolvedValueOnce(["charged", "text", 25, 25]);
+    const result = await store.revealHint("octocat", "juice-shop", "Challenge-5-Admin-Section");
+    expect(result).toMatchObject({ ok: true, cost: 25 });
+    expect(mocks.upstashEval.mock.calls[0][2][12]).toBe(String(store.HINT_COST));
+  });
+
+  // The price rose past what the contestant can afford: the gate refuses
+  // before the script runs. A stale quote must still come back as the new
+  // price to confirm, not as "not enough points" at a price they never saw.
+  it("answers repriced, not insufficient, when the gate refuses a stale quote", async () => {
+    const store = await loadStore();
+    mocks.getAdminSettings.mockResolvedValue({ ...BASE_SETTINGS, hintCost: 25 });
+    mocks.hintBalance.mockResolvedValue({ gross: 20, spent: 0, net: 20 });
+    const result = await store.revealHint("octocat", "juice-shop", "Challenge-5-Admin-Section", { quotedCost: 10 });
+    expect(result).toEqual({
+      ok: false,
+      repriced: true,
+      cost: 25,
+      error: "This hint now costs 25 pts. Confirm again to buy it at the new price.",
+    });
+    expect(mocks.upstashEval).not.toHaveBeenCalled();
+  });
+
+  it("still says not enough points when the quote matches the price", async () => {
+    const store = await loadStore();
+    mocks.getAdminSettings.mockResolvedValue({ ...BASE_SETTINGS, hintCost: 25 });
+    mocks.hintBalance.mockResolvedValue({ gross: 20, spent: 0, net: 20 });
+    const result = await store.revealHint("octocat", "juice-shop", "Challenge-5-Admin-Section", { quotedCost: 25 });
+    expect(result).toMatchObject({ ok: false, forbidden: true });
+    expect(result).not.toHaveProperty("repriced");
+  });
+
+  it("maps a repriced verdict to a refusal carrying the new price, charging nothing", async () => {
+    const store = await loadStore();
+    mocks.getAdminSettings.mockResolvedValue({ ...BASE_SETTINGS, hintCost: 25 });
+    mocks.upstashEval.mockResolvedValueOnce(["repriced", "", 25]);
+    const result = await store.revealHint("octocat", "juice-shop", "Challenge-5-Admin-Section", { quotedCost: 10 });
+    expect(result).toEqual({
+      ok: false,
+      repriced: true,
+      cost: 25,
+      error: "This hint now costs 25 pts. Confirm again to buy it at the new price.",
+    });
+  });
+
   it("maps the script's insufficient verdict to the same 403 message, from the spend it saw", async () => {
     const store = await loadStore();
     // The gate saw net 1000 (RICH) — then a parallel purchase landed first and
