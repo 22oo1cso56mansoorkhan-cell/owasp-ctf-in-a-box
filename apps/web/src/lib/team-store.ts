@@ -593,11 +593,18 @@ export async function listTeams(): Promise<TeamInfo[]> {
   );
   return slugs.map((slug, i) => {
     const nameRes = results[i * 2]?.result;
-    const membersRes = results[i * 2 + 1]?.result;
+    // An empty roster is the same short list the SCAN check refuses: a
+    // competing team on the board with nobody on it. A failed name read only
+    // costs the display name, which falls back to the slug.
+    // A missing reply or a non-list is a read that did not happen either:
+    // SMEMBERS of a key SCAN just listed is a list, even an empty one.
+    const membersReply = results[i * 2 + 1];
+    if (membersReply?.error) throw new Error(`SMEMBERS failed (listTeams ${slug}): ${membersReply.error}`);
+    if (!Array.isArray(membersReply?.result)) throw new Error(`SMEMBERS reply missing or not a list (listTeams ${slug})`);
     return {
       slug,
       name: typeof nameRes === "string" && nameRes ? nameRes : slug,
-      members: Array.isArray(membersRes) ? [...(membersRes as string[])].sort() : [],
+      members: [...(membersReply.result as string[])].sort(),
     };
   });
 }
