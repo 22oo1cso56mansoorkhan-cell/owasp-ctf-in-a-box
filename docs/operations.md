@@ -1628,6 +1628,47 @@ challenge's own title to confirm (falling back to its id for a
 blank/whitespace-only title), the same pattern the quiz's delete and the
 master reset use.
 
+**A challenge can be hidden without deleting it, or released on a
+schedule.** Each challenge's form has a **Visible to contestants** switch (on
+for a new challenge) and an optional **Release at** time, and every row in
+the list carries a status chip: **Live**, **Disabled**, or **Releases Oct 8,
+10:00 GMT-3**. Switch it off to stage a challenge before it goes up, or to
+pull a broken one mid-event. Set a release time for the day-2 and day-3
+drops: the challenge stays hidden until that instant and then goes live on
+its own. Nothing runs on the box to do it: every page read compares the
+release time with the server's clock, and grading and hint purchases compare
+it with Redis's clock, so a submission racing the instant is decided once.
+The time is entered on the event's clock (Event tab → Timezone, the same zone
+the schedule uses) and the form shows the UTC instant it stores. Setting a
+release time switches the challenge off until then; switching it on clears
+the release time; saving a time that has already passed saves it live.
+Give the steps of a story the same release time to release the story
+together: release is per challenge. A
+hidden challenge does not exist on the contestant side: it is left out of the
+board, its page is the same 404 an unknown id gets, its flag is refused like
+an unknown challenge's (no attempt spent, no cooldown, decided by the grading
+script itself), its hint cannot be bought, its files do not download, and it
+is out of every leaderboard, profile and display-mode denominator. In a
+story, the chain closes up around it, the same as a deleted step, and
+switching it back on puts it back in its place. Solves already banked on it
+stay, like a deleted challenge's: the solver keeps the points, the challenge
+disappears from their lists too, and their profile shows one line, "+N pts
+from challenges no longer on the board", so their total still adds up
+(points banked on a deleted challenge are counted in the same line). An admin
+can still open a hidden or scheduled challenge's page, before launch or
+after, to check it: the page carries a **Hidden from contestants** banner
+saying why (Disabled, or Releases at what time), and a flag or hint used
+there is a dry run that records nothing for the admin. A bundle or event
+archive carries the switch (bundle version 4, stamped only when some
+challenge is hidden, so other exports still import on an older box), and an
+older bundle that carries it is refused rather than imported live. In a
+hand-written bundle, `releaseAt` is an ISO 8601 date and time that names its
+zone: it ends in `Z` (`2026-10-08T13:00:00Z`) or an explicit offset
+(`2026-10-08T10:00:00-03:00`). One without a zone, or a date or time that does
+not exist (`2026-02-30`, `25:00`), is refused, because the box would
+otherwise read it in its own zone and release at an instant nobody meant. The
+admin form always stores the UTC form, so it never trips this.
+
 **Matching is whitespace-insensitive and — by default — case-insensitive,
 normalized identically on both the authoring and submission sides.** The
 stored flag is trimmed, then Unicode-NFC-normalized, then lowercased before

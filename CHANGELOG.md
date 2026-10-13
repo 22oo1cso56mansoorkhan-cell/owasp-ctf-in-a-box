@@ -10,6 +10,23 @@ repo-level — `apps/web/package.json` tracks the current tag; `scorer` and
 
 ### Changes
 
+- **Added: hide a Jeopardy challenge, or schedule its release (#189).** Each
+  challenge has a "Visible to contestants" switch and an optional "Release
+  at" time in `/admin`, entered on the event's time zone and stored as UTC.
+  The list shows a Live, Disabled or "Releases Oct 8, 10:00 GMT-3" chip per
+  row. A scheduled challenge goes live at that instant on its own, with
+  nothing running on the box: every read decides it, and grading and hint
+  purchases decide it by Redis's clock. A hidden challenge does not exist
+  for contestants: it is absent from the board, its page and the expanded
+  leaderboard rows, its flag is refused like an unknown challenge's with no
+  attempt spent, its hint and files are refused, and it is out of every
+  denominator. A story closes up around a hidden step and reopens in order
+  when it is released. Points already banked on it stay, and the profile
+  names them in one "+N pts from challenges no longer on the board" line.
+  An admin can still open a hidden challenge's page, marked "Hidden from
+  contestants", where a flag or hint is a dry run that records nothing.
+  Bundles carrying either field are version 4; an older bundle carrying one
+  is refused.
 - **Fixed: setup and deploy script hygiene (#496).** `ctf-setup.sh`,
   `scripts/dev-stack` and both Fly scripts now read `.env` through one shared
   reader, `scripts/lib/dotenv.sh`. It reads a subset of docker compose's

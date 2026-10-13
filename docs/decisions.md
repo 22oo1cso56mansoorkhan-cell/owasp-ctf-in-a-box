@@ -83,6 +83,7 @@ their **Status** line; the record itself is never rewritten.
 - [ADR 65 — An event adds its own logo and favicon; the OWASP mark stays](#adr-65-an-event-adds-its-own-logo-and-favicon-the-owasp-mark-stays)
 - [ADR 66 — The regular leaderboard shows the event logo and the sponsor strip](#adr-66-the-regular-leaderboard-shows-the-event-logo-and-the-sponsor-strip)
 - [ADR 67 — A Secure Development solve is timed, and judged, by its score comment](#adr-67-a-secure-development-solve-is-timed-and-judged-by-its-score-comment)
+- [ADR 68 — A Jeopardy challenge can be hidden or scheduled; visibility is derived at read time and enforced in every reader, the grader deciding by Redis's clock](#adr-68-a-jeopardy-challenge-can-be-hidden-or-scheduled-visibility-is-derived-at-read-time-and-enforced-in-every-reader-the-grader-deciding-by-rediss-clock)
 
 ## ADR 1. Keep the GitHub fork/PR/Action flow — it is the pedagogy
 
@@ -4115,3 +4116,91 @@ across every admin action and is not structured for an instant lookup; the
 pause log is one short list with one shape.
 
 **Status.** Accepted (#596). Amends [ADR 32](#adr-32-scheduled-windows-evaluated-at-read-time-in-three-readers).
+
+## ADR 68. A Jeopardy challenge can be hidden or scheduled; visibility is derived at read time and enforced in every reader, the grader deciding by Redis's clock
+
+**Context.** Issue #189. A Jeopardy challenge had no visibility state: the
+moment an organizer saved one it was live for every contestant. A board
+could not be staged the night before, a broken flag could not be pulled
+without deleting its solves, and a multi-day event could not release
+challenges in rounds without someone authoring live in front of the board.
+
+**Decision.**
+- **Visibility is a field on the challenge's public record.** `enabled`
+  (absent means live, stored only when `false`), so every record, bundle and
+  archive written before it behaves as before.
+- **A release is an instant, evaluated at read time.** `releaseAt`, entered
+  on the event's clock (the Event tab's time zone) and stored as UTC ISO.
+  Visible iff `enabled !== false` or `now >= releaseAt`; the instant itself
+  is released. No scheduler, cron or job on the box: like the scheduled
+  scoring window (ADRs 32 and 59), every reader compares the instant with its
+  own clock.
+  The write settles it once: a future instant is kept with `enabled: false`;
+  one already passed is stored as plain live. Release is per challenge; a
+  story releases together when its steps share an instant.
+- **Two clocks, one decision each.** Pages read with the server's clock. The
+  grading and hint scripts read Redis's `TIME` and the record's
+  `releaseAtMs` (an epoch-ms mirror the store writes beside the instant, so
+  Lua parses no ISO date, the attempt row's `lastAtMs` precedent), so a
+  request racing the release is decided once, where the write happens. A
+  page can lag the grader by at most the leaderboard fold's memo.
+- **Hidden means the challenge does not exist on the contestant side.** Not
+  "not rendered": it is left out of every server payload. One pure
+  predicate, `isChallengeVisible` (`lib/classic-release.ts`), answers it for
+  every reader: the board, the challenge page and its metadata, the
+  board-items API, the profile, the landing count, the leaderboard and
+  display-mode denominators, the `/api/hints` texts, and the attachment
+  download (through `classicVisibility`, ADR 61). `listChallenges` returns
+  hidden challenges too; a source scan
+  (`classic-release-coverage.test.ts`) fails any caller that does not
+  filter. A story's chain is built over the visible challenges, so a hidden
+  step is skipped like a deleted one (ADR 60) and comes back in its stored
+  place.
+- **The scripts that write decide for themselves.** `SUBMIT_SCRIPT` reads
+  the challenge's record before anything else and answers a hidden one
+  `missing`, the reply an unknown id gets: before the already-solved guard,
+  so a solver of a withdrawn challenge is refused too, and before any
+  attempt is spent. The hint `REVEAL_SCRIPT` does the same from the record
+  in `KEYS[8]`, before the story lock, the text or a charge; an owned hint
+  is not exempt. The JS pre-check leaves a hidden challenge's "solved" and
+  "cooldown" refusals to the script, since either would confirm it exists.
+  An admin preview's dry run (ADR 59) skips the check, so an organizer can
+  test a hidden challenge before launch; the pre-launch lock still applies
+  on top for everyone else.
+- **An admin can still open it.** `classicVisibility` lets an admin (the
+  same case-insensitive admin check as `/admin`) open a hidden or scheduled
+  challenge's page at any time, with a "Hidden from contestants" banner
+  naming why. A flag or hint the admin uses there is a dry run
+  (`adminSeesHidden` in the submit and reveal routes), so nothing is
+  recorded for them. To anyone else it is still the unknown id's 404.
+- **Banked points stay.** Hiding a challenge is the delete dialog's promise:
+  solves and points already banked are kept. The challenge leaves the
+  solver's lists too, and the profile names the points in one line ("+N pts
+  from challenges no longer on the board", which counts deleted challenges
+  too) so the list still adds up to the total.
+- **Bundles carry it.** Version 4, stamped only when some challenge is
+  hidden or scheduled, so other exports stay importable on an older box. An
+  older version carrying either field is refused by position and rule, never
+  by value: an older box would otherwise import the challenge live.
+- **The admin sees everything.** The list shows a status chip per challenge
+  (Live, Disabled, or "Releases Oct 8, 10:00 GMT-3" on the event's clock),
+  and the form edits the switch and the release time.
+
+This was chosen over a separate "draft" store (a second place for a
+challenge to live, and a copy step that can lose fields), over hiding in the
+components (a hand-made request, or a payload a component happens not to
+render, would still carry the challenge), and over a release job on the box
+(one more process to keep alive, and a release that silently does not happen
+when it is down). It is not a three-reader rule: only the app reads Jeopardy
+challenges, so scorer and sync are untouched.
+
+**Consequences.** Every contestant reader pays one predicate call over a list
+it already read; the graders read the record they already read (the submit
+script) or one more `HGET` (the reveal script), and a `TIME` only for a
+scheduled record. Every write of a record goes through one canonical form,
+so a rename or an import cannot drop `releaseAtMs` and leave a challenge the
+pages release and the grader never does. A release does not announce itself:
+the board shows the challenge on the next read. The reveal script's lock
+keys move from `KEYS[8..]` to `KEYS[9..]`. A future reader of the challenge
+list has to filter, and the source scan says so if it does not.
+
