@@ -277,6 +277,34 @@ repo-level — `apps/web/package.json` tracks the current tag; `scorer` and
   score history yet to chart." with hundreds of points on the board. Scores,
   ranks and the module rows were never affected.
 
+- **Changed: classic story-lock reachable totals in profile and leaderboard
+  (#570).** The classic module's denominator now counts only challenges
+  reachable under the story-lock rules: step 1 of every story is always
+  reachable; each later step unlocks only when its prerequisite was solved
+  for that team — by a member who was on the team at the time (the
+  `joinedAt` rule, ADR 60), so a solve carried in from another team keeps
+  its points for the team but opens nothing after it. Locked steps are
+  excluded from both the challenge count and the points ceiling — their
+  titles and points are never exposed. A solo contestant is a team of one:
+  their own solves unlock the next steps just like a team's. An unreadable
+  story list now fails the request rather than degrading to "nothing is
+  locked", which would put locked steps' titles and points on the board.
+  The union with solve records is preserved, so challenges solved before
+  deletion still count — and the profile takes its solve records and its
+  solve-time eligibility set from ONE roster it already resolved (the same
+  team-totals helper the leaderboard rows use), so a teammate's deleted
+  solve counts in the ceiling exactly as the viewer's own. The profile
+  shows "X of Y pts available" and a locked-step marker
+  ("· 1 step locked", or "· N steps locked") when applicable, with a
+  disclaimer: "Totals count unlocked challenges
+  only — story steps add to the total as your team unlocks them." The
+  leaderboard's "solved / total" column, its contestant rows and its team
+  rows each use that row's own reachable denominator instead of the
+  event-wide catalogue count, and the same disclaimer appears on the board
+  while any row still has locked steps. This replaces the previous
+  `visibleClassic` filtering and the event-wide `completable` denominator
+  with a single shared helper in `lib/leaderboard/denominators.ts`.
+
 - **Changed: the maintainability follow-ups from the pre-v0.7.0 audit
   (#504).** Refactors with no behavior change: the demo seed and clear body
   moved out of `admin-store.ts` (43% of that file) into `lib/demo-seed.ts`,
